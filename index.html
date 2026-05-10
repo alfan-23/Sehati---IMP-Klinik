@@ -55,27 +55,6 @@
             </div>
 
             <div id="selection-screen">
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8 flex flex-col md:flex-row justify-between gap-6 items-center">
-                    <div class="w-full md:w-1/2">
-                        <h2 class="text-base font-bold text-slate-800 mb-1 flex items-center gap-2">
-                            <i class="fa-solid fa-link text-emerald-500"></i> Status Koneksi AI
-                        </h2>
-                        <p class="text-xs text-slate-500">Sistem menggunakan kunci API terintegrasi dari lingkungan eksekusi.</p>
-                    </div>
-                    <div class="w-full md:w-1/2 flex flex-col">
-                        <div class="flex gap-2">
-                            <input type="text" id="api-key-input" class="w-full px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl focus:ring-0 outline-none text-sm font-bold text-emerald-700" value="KONEKSI OTOMATIS" readonly disabled>
-                            <button class="bg-slate-300 text-slate-500 font-bold py-2.5 px-5 rounded-xl text-xs whitespace-nowrap shadow-sm cursor-not-allowed" disabled>
-                                Terhubung
-                            </button>
-                        </div>
-                        <div class="flex justify-between items-center mt-2 px-1">
-                            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Mesin: <span id="active-model-display" class="text-blue-500">gemini-2.5-flash-preview</span></p>
-                            <div id="api-status" class="text-[10px] font-bold text-right text-emerald-500">Sistem Aktif!</div>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="grid md:grid-cols-3 gap-6">
                     <div onclick="startWorkflow('impp')" class="cursor-pointer bg-white p-8 rounded-3xl shadow-sm hover:shadow-xl transition-all border-2 border-transparent hover:border-blue-500 relative flex flex-col group">
                         <div class="absolute -top-4 -left-4 bg-blue-600 text-white w-10 h-10 flex items-center justify-center rounded-2xl font-black shadow-lg shadow-blue-500/30 group-hover:scale-110 transition-transform">1</div>
@@ -319,6 +298,10 @@
         let savedImppContext = { title: "", detail: "", html: "" }; 
         let imppelCollection = []; 
         let imppInputState = { category: "", description: "" };
+        
+        // VARIABEL KONFIGURASI API KEY OTOMATIS DARI DASHBOARD
+        let apiKey = ""; 
+        let modelName = "gemini-2.5-flash";
 
         function handleUnitSelection() {
             const select = document.getElementById('unit-select');
@@ -340,11 +323,25 @@
         }
 
         window.onload = () => {
+            // TARIK CONFIG AWAL DARI URL ATAU MINTA KE DASHBOARD
+            const urlParams = new URLSearchParams(window.location.search);
+            if(urlParams.get('key')) apiKey = urlParams.get('key');
+            if(urlParams.get('model')) modelName = urlParams.get('model');
+            if (!apiKey && window.parent !== window) window.parent.postMessage({ type: 'REQUEST_CONFIG' }, '*');
+
             loadFromStorage();
             document.getElementById('selection-screen').classList.remove('hidden');
             document.getElementById('workflow-container').classList.add('hidden');
             updateCounters();
         };
+
+        // LISTENER UPDATE DARI DASHBOARD
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'UPDATE_CONFIG') {
+                apiKey = event.data.key;
+                modelName = event.data.model;
+            }
+        });
 
         function loadFromStorage() {
             const storedImpp = localStorage.getItem('ilp_impp_context');
@@ -587,6 +584,11 @@
         }
 
         function startWorkflow(type) {
+            if (!apiKey) {
+                showModal("Sistem AI belum menerima API Key dari Dashboard. Pastikan Anda telah mengisinya di menu sebelah kiri.");
+                return;
+            }
+
             document.getElementById('selection-screen').classList.add('hidden');
             document.getElementById('workflow-container').classList.remove('hidden');
             if (type === 'impp') {
@@ -606,10 +608,12 @@
 
         // === FUNGSI NATIVE CANVAS GEMINI API ===
         async function callGeminiJson(prompt) {
-            const apiKey = ""; 
-            const modelName = "gemini-2.5-flash-preview-09-2025";
-            const delays = [1000, 2000, 4000, 8000, 16000];
+            if (!apiKey) {
+                showModal('API Key belum didapatkan dari Dashboard.');
+                throw new Error("No API Key");
+            }
 
+            const delays = [1000, 2000, 4000, 8000, 16000];
             const payload = { 
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: { responseMimeType: "application/json", temperature: 0.2 } 
@@ -634,9 +638,11 @@
                     
                     if (!textResult) throw new Error("Format respons tidak valid");
                     
+                    if (window.parent !== window) window.parent.postMessage({ type: 'API_SUCCESS' }, '*');
                     return JSON.parse(textResult);
                 } catch (error) {
                     lastError = error;
+                    if (window.parent !== window) window.parent.postMessage({ type: 'API_ERROR', code: error.message }, '*');
                     if (i < 4) await new Promise(resolve => setTimeout(resolve, delays[i]));
                 }
             }
